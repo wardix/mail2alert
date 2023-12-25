@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+
+import argparse
+import pytz
+import sys
+import email
+import json
+import requests
+from datetime import datetime, timedelta
+
+
+def main():
+    args = parse_arguments()
+
+    alert_timezone = pytz.timezone(args.timezone)
+    alert_data = {
+        "labels": {
+            "alertname": args.label_alertname,
+            "group": args.label_group,
+            "severity": args.label_severity,
+        },
+        "annotations": {},
+        "generatorURL": args.generator_url,
+    }
+
+    raw_email_content = sys.stdin.read()
+    email_info = parse_email(raw_email_content)
+
+    start_time = datetime.now(alert_timezone)
+    end_time = start_time + timedelta(hours=24)
+
+    alert_data["labels"].update(email_info)
+    alert_data["startsAt"] = format_to_rfc3339(start_time)
+    alert_data["endsAt"] = format_to_rfc3339(end_time)
+
+    submit_alert(alert_data, args.alertmanager_url)
+
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="Process command line options.")
+    parser.add_argument(
+        "--alertmanager-url", required=True, help="URL of the AlertManager"
+    )
+    parser.add_argument("--generator-url", required=True, help="URL of the Generator")
+    parser.add_argument(
+        "--timezone", required=True, help="Timezone for the alert timestamps"
+    )
+    parser.add_argument(
+        "--label-alertname", required=True, help="Label for the alert name"
+    )
+    parser.add_argument(
+        "--label-group", required=True, help="Label for the alert group"
+    )
+    parser.add_argument(
+        "--label-severity", required=True, help="Label for the alert severity"
+    )
+    return parser.parse_args()
+
+
+def parse_email(raw_email):
+    email_message = email.message_from_string(raw_email)
+    return {
+        "from": email_message.get("From", ""),
+        "subject": email_message.get("Subject", "No Subject"),
+        "messageid": email_message.get("Message-ID", "No Message-ID"),
+    }
+
+
+def format_to_rfc3339(datetime_obj):
+    formatted_datetime = datetime_obj.strftime("%Y-%m-%dT%H:%M:%S.%f")[
+        :-3
+    ] + datetime_obj.strftime("%z")
+    return formatted_datetime[:-2] + ":" + formatted_datetime[-2:]
+
+
+def submit_alert(alert_data, alertmanager_url):
+    requests.post(alertmanager_url, json=[alert_data])
+
+
+if __name__ == "__main__":
+    main()
